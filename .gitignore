@@ -1,0 +1,4 @@
+webui/node_modules/
+internal/web/dist/
+*.ipk
+data/
