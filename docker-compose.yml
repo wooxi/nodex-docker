@@ -1,0 +1,11 @@
+services:
+  nodex:
+    build: .
+    image: nodex:latest
+    container_name: nodex
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./data:/etc/nodex
+    environment:
+      - TZ=Asia/Shanghai

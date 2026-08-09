@@ -1,0 +1,118 @@
+name: Build NodeX ipk
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Build frontend
+        working-directory: webui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Build nodex binary
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o openwrt/files/nodex ./cmd/nodex
+
+      - name: Install OpenWrt SDK
+        run: |
+          SDK_URL=https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          for i in 1 2 3; do
+            wget -q --timeout=120 --tries=3 -O openwrt-sdk.tar.xz "$SDK_URL" && break
+            echo "download failed (attempt $i), retrying..."
+            sleep 10
+          done
+          ls -la openwrt-sdk.tar.xz
+          tar xf openwrt-sdk.tar.xz
+          mv openwrt-sdk-* sdk
+
+      - name: Build ipk
+        run: |
+          mkdir -p sdk/package/nodex sdk/package/luci-app-nodex
+          cp -r openwrt/* sdk/package/nodex/
+          cp -r openwrt-luci/* sdk/package/luci-app-nodex/
+          cd sdk
+          make defconfig
+          make package/nodex/compile V=s
+          make package/luci-app-nodex/compile V=s
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          cp sdk/bin/packages/x86_64/*/nodex_*.ipk dist/ 2>/dev/null || true
+          cp sdk/bin/packages/*/*/luci-app-nodex_*.ipk dist/ 2>/dev/null || true
+          cp openwrt/files/nodex dist/nodex-linux-amd64
+          # 托管核心二进制（与项目统一发布，供一键下载/更新）
+          curl -sL -o dist/xray-linux-amd64 https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
+            (cd dist && unzip -o -q xray-linux-amd64 xray && mv xray xray-linux-amd64 && rm -f xray-linux-amd64.zip || true)
+          curl -sL -o dist/hysteria-linux-amd64 https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-amd64
+          chmod +x dist/*-linux-amd64 2>/dev/null || true
+          ls -la dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nodex-ipk
+          path: dist/
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
