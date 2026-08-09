@@ -30,6 +30,8 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
+          build-args: |
+            VERSION=${{ github.ref_name }}
           push: true
           tags: |
             ghcr.io/${{ github.repository }}:latest

@@ -14,6 +14,7 @@ RUN npm run build
 FROM golang:1.26-alpine AS backend
 # 国内环境可设 GOPROXY=https://goproxy.cn,direct
 ARG GOPROXY=https://proxy.golang.org,direct
+ARG VERSION=dev
 WORKDIR /build
 COPY go.mod go.sum ./
 RUN GOPROXY=$GOPROXY go mod download
@@ -21,7 +22,7 @@ COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 # 前端产物供 embed（vite outDir 配置为 ../internal/web/dist）
 COPY --from=frontend /build/internal/web/dist ./internal/web/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w" -o nodex ./cmd/nodex
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w -X main.version=$VERSION" -o nodex ./cmd/nodex
 
 # 阶段3: 运行镜像
 FROM debian:bookworm-slim
