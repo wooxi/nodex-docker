@@ -1,12 +1,19 @@
 # NodeX 多阶段构建
+# 阶段0: 拉取上游源码（默认 wooxi/nodex 主仓库，可用 SOURCE_REPO 覆盖）
+FROM alpine/git AS source
+ARG SOURCE_REPO=https://github.com/wooxi/nodex.git
+ARG SOURCE_REF=main
+RUN git clone --depth 1 --branch ${SOURCE_REF} ${SOURCE_REPO} /src \
+    && rm -rf /src/.git
+
 # 阶段1: 前端构建
 FROM node:20-alpine AS frontend
 # 国内环境可设 NPM_REGISTRY=https://registry.npmmirror.com
 ARG NPM_REGISTRY=https://registry.npmjs.org
 WORKDIR /build/webui
-COPY webui/package.json webui/package-lock.json ./
+COPY --from=source /src/webui/package.json /src/webui/package-lock.json ./
 RUN npm config set registry $NPM_REGISTRY && npm ci --no-audit --no-fund
-COPY webui/ ./
+COPY --from=source /src/webui/ ./
 RUN npm run build
 # 产物输出到 ../internal/web/dist（vite outDir 配置）
 
@@ -16,10 +23,10 @@ FROM golang:1.26-alpine AS backend
 ARG GOPROXY=https://proxy.golang.org,direct
 ARG VERSION=dev
 WORKDIR /build
-COPY go.mod go.sum ./
+COPY --from=source /src/go.mod /src/go.sum ./
 RUN GOPROXY=$GOPROXY go mod download
-COPY cmd/ ./cmd/
-COPY internal/ ./internal/
+COPY --from=source /src/cmd/ ./cmd/
+COPY --from=source /src/internal/ ./internal/
 # 前端产物供 embed（vite outDir 配置为 ../internal/web/dist）
 COPY --from=frontend /build/internal/web/dist ./internal/web/dist
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-s -w -X main.version=$VERSION" -o nodex ./cmd/nodex

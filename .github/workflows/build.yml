@@ -4,6 +4,12 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+  # 上游 nodex 主仓库更新时自动构建（自动更新功能）
+  repository_dispatch:
+    types: [upstream-updated]
+  schedule:
+    # 每日检查上游更新（UTC 每天 3 点）
+    - cron: '0 3 * * *'
 
 jobs:
   docker:
